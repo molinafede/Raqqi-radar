@@ -2,68 +2,71 @@ import json
 import httpx
 import h3
 
-# Coordenadas base de tu zona de operaciones habitual
-BASE_LAT = -34.6037
-BASE_LNG = -58.3816
+# Múltiples puntos estratégicos (Hubs) para cubrir Capital Federal y todo el corredor sur hasta Berazategui
+HUBS = [
+    {"lat": -34.6037, "lng": -58.3816},  # Centro / Capital Federal
+    {"lat": -34.6611, "lng": -58.3683},  # Avellaneda / Lanús
+    {"lat": -34.7212, "lng": -58.2618},  # Quilmes
+    {"lat": -34.8150, "lng": -58.2750}   # Berazategui
+]
 
 def generate_radar():
-    analyzed_hexagons = []
+    all_stores = []
+    analyzed_hexagons = {} # Usar diccionario para evitar celdas duplicadas
     
-    try:
-        # Calcular celdas H3
-        current_cell = h3.latLngToCell(BASE_LAT, BASE_LNG, 8)
-        surrounding_cells = h3.grid_disk(current_cell, 2)
-        
-        # Consultar API pública de tiendas cercanas con manejo de errores
-        stores_endpoint = f"https://www.rappi.com.ar/api/rocket/stores?lat={BASE_LAT}&lng={BASE_LNG}"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
-        stores = []
+    # 1. Consultar la API de Rappi en cada uno de los hubs para recolectar todas las tiendas activas de la región
+    for hub in HUBS:
+        stores_endpoint = f"https://www.rappi.com.ar/api/rocket/stores?lat={hub['lat']}&lng={hub['lng']}"
         try:
-            response = httpx.get(stores_endpoint, headers=headers, timeout=8.0)
+            response = httpx.get(stores_endpoint, headers=headers, timeout=6.0)
             if response.status_code == 200:
                 data = response.json()
                 stores = data.get("stores", [])
-        except Exception as api_err:
-            print(f"Aviso de red/API: {api_err}")
+                all_stores.extend(stores)
+        except Exception as e:
+            print(f"Aviso en hub {hub}: {e}")
 
-        for cell in surrounding_cells:
-            c_lat, c_lng = h3.cell_to_latlng(cell)
-            
-            store_score = 0
-            for store in stores:
-                if store.get("is_open", False):
-                    s_lat = store.get("lat", 0)
-                    s_lng = store.get("lng", 0)
-                    if abs(s_lat - c_lat) < 0.003 and abs(s_lng - c_lng) < 0.003:
-                        store_score += store.get("average_ticket_score", 50)
+    # 2. Generar una malla amplia de celdas H3 (resolución 8) cubriendo los alrededores de cada hub
+    target_cells = set()
+    for hub in HUBS:
+        center_cell = h3.latLngToCell(hub['lat'], hub['lng'], 8)
+        disk = h3.grid_disk(center_cell, 3) # Expande el radio de cobertura por cada zona
+        target_cells.update(disk)
 
-            is_target = store_score > 150
-            color = "#ff4d4d" if is_target else "#3388ff"
-            opacity = 0.55 if is_target else 0.04 
+    # 3. Evaluar la demanda de cada hexágono en base a las tiendas abiertas recolectadas
+    for cell in target_cells:
+        c_lat, c_lng = h3.cell_to_latlng(cell)
+        
+        store_score = 0
+        for store in all_stores:
+            if store.get("is_open", False):
+                s_lat = store.get("lat", 0)
+                s_lng = store.get("lng", 0)
+                if abs(s_lat - c_lat) < 0.005 and abs(s_lng - c_lng) < 0.005:
+                    store_score += store.get("average_ticket_score", 50)
 
-            analyzed_hexagons.append({
-                "cell": cell,
-                "boundary": h3.cell_to_boundary(cell),
-                "color": color,
-                "opacity": opacity,
-                "score": store_score
-            })
+        # Criterio de alta demanda: si acumula buen puntaje de restaurantes activos
+        is_target = store_score > 80
+        
+        # Estilo visual: Totalmente transparentes (opacity 0.03) para ver las calles, y rojo brillante si es zona caliente
+        color = "#ff4d4d" if is_target else "#3388ff"
+        opacity = 0.6 if is_target else 0.03 
 
-        output = {
-            "status": "success",
-            "hexagons": analyzed_hexagons
+        analyzed_hexagons[cell] = {
+            "cell": cell,
+            "boundary": h3.cell_to_boundary(cell),
+            "color": color,
+            "opacity": opacity,
+            "score": store_score
         }
 
-    except Exception as e:
-        # Fallback de seguridad total: aunque falle todo, genera una estructura vacía válida para la web
-        output = {
-            "status": "fallback",
-            "error": str(e),
-            "hexagons": []
-        }
+    output = {
+        "status": "success",
+        "hexagons": list(analyzed_hexagons.values())
+    }
 
-    # Escribir siempre el JSON para que el workflow termine con éxito (Exit Code 0)
     with open("radar_data.json", "w") as f:
         json.dump(output, f)
 
