@@ -17,9 +17,10 @@
         .hud-status { font-size: 11px; line-height: 1.4; }
         .target-alert { font-size: 12px; font-weight: bold; color: #ff4d4d; text-align: right; }
         .hex-badge {
-            background: rgba(11, 15, 25, 0.85); border: 1px solid #fff; padding: 2px 5px;
-            border-radius: 4px; font-family: monospace; font-size: 10px; font-weight: bold;
-            display: flex; gap: 4px; white-space: nowrap; transform: translate(-50%, -50%);
+            background: rgba(11, 15, 25, 0.9); border: 1px solid #fff; padding: 2px 6px;
+            border-radius: 4px; font-family: monospace; font-size: 11px; font-weight: bold;
+            display: flex; gap: 5px; white-space: nowrap; transform: translate(-50%, -50%);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.5);
         }
         .badge-green { color: #00ffcc; }
         .badge-bordo { color: #ff4d4d; }
@@ -42,9 +43,9 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/h3-js"></script>
     <script>
+        // 1. Inicializar el mapa de inmediato (centrado en Buenos Aires por defecto)
         const map = L.map('map', {zoomControl: true, attributionControl: false}).setView([-34.6037, -58.3816], 13);
 
-        // CORRECCIÓN: URL de OpenStreetMap limpia y sin etiquetas rotas
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
             attribution: '&copy; OpenStreetMap'
@@ -56,44 +57,96 @@
 
         map.on('movestart', () => { isUserInteracting = true; });
 
+        // 2. Función para cargar los datos del radar y pintar hexágonos + contadores numéricos
         function loadRadarData() {
             fetch('radar_data.json?t=' + new Date().getTime())
             .then(res => res.json())
             .then(data => {
-                document.getElementById('gps-status').innerText = 'EN LÍNEA';
-                document.getElementById('gps-status').style.color = '#00ffcc';
-                
                 hexLayerGroup.clearLayers();
                 let hasRedTarget = false;
 
-                data.hexagons.forEach(hex => {
-                    const latLngs = hex.boundary.map(coord => [coord[0], coord[1]]);
-                    
-                    if (hex.color === '#ff4d4d') {
-                        hasRedTarget = true;
+                if (data && data.hexagons) {
+                    data.hexagons.forEach(hex => {
+                        if (!hex.boundary || hex.boundary.length === 0) return;
+                        
+                        const latLngs = hex.boundary.map(coord => [coord[0], coord[1]]);
+                        
+                        if (hex.color === '#ff4d4d') {
+                            hasRedTarget = true;
+                        }
+
+                        // Dibujar el polígono hexagonal
+                        L.polygon(latLngs, {
+                            color: hex.color,
+                            weight: hex.color === '#ff4d4d' ? 2 : 1,
+                            fillColor: hex.color,
+                            fillOpacity: hex.opacity
+                        }).addTo(hexLayerGroup);
+
+                        // Si la celda tiene locales activos, dibujar la etiqueta con los 2 datos analíticos
+                        if (hex.count > 0) {
+                            const centerLat = latLngs.reduce((sum, c) => sum + c[0], 0) / latLngs.length;
+                            const centerLng = latLngs.reduce((sum, c) => sum + c[1], 0) / latLngs.length;
+
+                            const badgeHtml = `<div class="hex-badge">
+                                <span class="badge-green" title="Locales Abiertos">🛒${hex.count}</span>
+                                <span class="badge-bordo" title="Índice de Presión/Demora">⚡${hex.score}</span>
+                            </div>`;
+
+                            const customIcon = L.divIcon({
+                                className: '',
+                                html: badgeHtml
+                            });
+
+                            L.marker([centerLat, centerLng], { icon: customIcon }).addTo(hexLayerGroup);
+                        }
+                    });
+                }
+
+                document.getElementById('action-state').innerText = hasRedTarget ? '¡OBJETIVO ROJO LOCALIZADO!' : 'ZONA NEUTRAL';
+            })
+            .catch(err => {
+                console.error("Error cargando JSON:", err);
+            });
+        }
+
+        // Cargar datos al iniciar la página y refrescar cada 30s
+        loadRadarData();
+        setInterval(loadRadarData, 30000);
+
+        // 3. Manejo de GPS de forma independiente y no bloqueante
+        if (navigator.geolocation) {
+            navigator.geolocation.watchPosition(position => {
+                const lat = position.coords.latitude;
+                const lng = position.coords.longitude;
+                
+                try {
+                    const currentCell = h3.latLngToCell(lat, lng, 8);
+                    document.getElementById('current-cell').innerText = currentCell;
+                } catch(e) {
+                    document.getElementById('current-cell').innerText = 'ERROR H3';
+                }
+
+                document.getElementById('gps-status').innerText = 'EN LÍNEA';
+                document.getElementById('gps-status').style.color = '#00ffcc';
+
+                if (!userMarker) {
+                    userMarker = L.circleMarker([lat, lng], {
+                        radius: 9, fillColor: "#00ffcc", color: "#ffffff", weight: 2.5, fillOpacity: 1
+                    }).addTo(map);
+                    map.setView([lat, lng], 15);
+                } else {
+                    userMarker.setLatLng([lat, lng]);
+                    if (!isUserInteracting) {
+                        map.panTo([lat, lng], {animate: true});
                     }
-
-                    const polygon = L.polygon(latLngs, {
-                        color: hex.color,
-                        weight: hex.color === '#ff4d4d' ? 2 : 1,
-                        fillColor: hex.color,
-                        fillOpacity: hex.opacity
-                    }).addTo(hexLayerGroup);
-
-                    if (hex.count > 0) {
-                        const centerLat = latLngs.reduce((sum, c) => sum + c[0], 0) / latLngs.length;
-                        const centerLng = latLngs.reduce((sum, c) => sum + c[1], 0) / latLngs.length;
-
-                        const badgeHtml = `<div class="hex-badge">
-                            <span class="badge-green" title="Locales Activos">🛒${hex.count}</span>
-                            <span class="badge-bordo" title="Índice de Presión/Demora">⚡${hex.score}</span>
-                        </div>`;
-
-                        const customIcon = L.divIcon({
-                            className: '',
-                            html: badgeHtml
-                        });
-
-                        L.marker([centerLat, centerLng], { icon: customIcon }).addTo(hexLayerGroup);
-                    }
-                });
+                }
+            }, err => {
+                document.getElementById('gps-status').innerText = 'GPS DENEGADO';
+            }, { enableHighAccuracy: true, timeout: 10000 });
+        } else {
+            document.getElementById('gps-status').innerText = 'NO SOPORTADO';
+        }
+    </script>
+</body>
+</html>
