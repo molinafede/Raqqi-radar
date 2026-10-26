@@ -40,10 +40,10 @@
         // Inicializar mapa permitiendo zoom y movimiento libre
         const map = L.map('map', {zoomControl: true, attributionControl: false}).setView([0, 0], 16);
 
-        // Capa de mapa CartoDB Voyager: excelente definición de nombres de calles y legibilidad en ruta
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+        // Capa de mapa OpenStreetMap (Libre, sin API Key y con nombres de calles claros)
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
-            subdomains: 'abcd'
+            attribution: '&copy; OpenStreetMap'
         }).addTo(map);
 
         let userMarker = null;
@@ -70,7 +70,7 @@
                         hasRedTarget = true;
                     }
 
-                    // Hexágonos transparentes (opacity baja) y el rojo con alta presencia táctica
+                    // Hexágonos transparentes y el rojo con alta presencia táctica
                     L.polygon(latLngs, {
                         color: hex.color,
                         weight: hex.color === '#ff4d4d' ? 2 : 1,
@@ -113,6 +113,7 @@
             }, { enableHighAccuracy: true });
         }
 
+        // Auto-refresco de datos cada 30 segundos
         setInterval(loadRadarData, 30000);
     </script>
 </body>
