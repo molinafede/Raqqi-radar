@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Rappi Sniper Radar - Tactical HUD</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body, html { margin: 0; padding: 0; height: 100%; background: #0b0f19; overflow: hidden; }
+        #map { width: 100%; height: 100vh; z-index: 1; }
+        .hud-panel {
+            position: absolute; top: 15px; left: 15px; right: 15px; z-index: 9999;
+            background: rgba(11, 15, 25, 0.9); border: 1px solid #00ffcc;
+            color: #00ffcc; padding: 10px 15px; border-radius: 8px; font-family: monospace;
+            box-shadow: 0 4px 15px rgba(0, 255, 204, 0.2); display: flex; justify-content: space-between; align-items: center;
+        }
+        .hud-status { font-size: 11px; line-height: 1.4; }
+        .target-alert { font-size: 12px; font-weight: bold; color: #ff4d4d; text-align: right; }
+    </style>
+</head>
+<body>
+
+    <div class="hud-panel">
+        <div class="hud-status">
+            GPS: <span id="gps-status" style="color: #ff4d4d;">BUSCANDO...</span><br>
+            CELDA H3: <span id="current-cell" style="color: #fff;">N/A</span>
+        </div>
+        <div class="target-alert">
+            ESTADO: <span id="action-state">ESCANEANDO</span>
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+    <!-- Leaflet & H3 JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/h3-js"></script>
+    <script>
+        // Inicializar mapa permitiendo zoom y movimiento libre
+        const map = L.map('map', {zoomControl: true, attributionControl: false}).setView([0, 0], 16);
+
+        // Capa de mapa CartoDB Voyager: excelente definición de nombres de calles y legibilidad en ruta
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+            maxZoom: 19,
+            subdomains: 'abcd'
+        }).addTo(map);
+
+        let userMarker = null;
+        let hexLayerGroup = L.layerGroup().addTo(map);
+        let isUserInteracting = false;
+
+        // Detectar si el usuario mueve el mapa manualmente para no sobreescribir su vista
+        map.on('movestart', () => { isUserInteracting = true; });
+
+        function loadRadarData() {
+            fetch('radar_data.json?t=' + new Date().getTime())
+            .then(res => res.json())
+            .then(data => {
+                document.getElementById('gps-status').innerText = 'EN LÍNEA';
+                document.getElementById('gps-status').style.color = '#00ffcc';
+                
+                hexLayerGroup.clearLayers();
+                let hasRedTarget = false;
+
+                data.hexagons.forEach(hex => {
+                    const latLngs = hex.boundary.map(coord => [coord[1], coord[0]]);
+                    
+                    if (hex.color === '#ff4d4d') {
+                        hasRedTarget = true;
+                    }
+
+                    // Hexágonos transparentes (opacity baja) y el rojo con alta presencia táctica
+                    L.polygon(latLngs, {
+                        color: hex.color,
+                        weight: hex.color === '#ff4d4d' ? 2 : 1,
+                        fillColor: hex.color,
+                        fillOpacity: hex.opacity
+                    }).addTo(hexLayerGroup);
+                });
+
+                document.getElementById('action-state').innerText = hasRedTarget ? '¡OBJETIVO ROJO LOCALIZADO!' : 'ZONA NEUTRAL';
+            })
+            .catch(err => {
+                document.getElementById('gps-status').innerText = 'SIN DATOS JSON';
+            });
+        }
+
+        if (navigator.geolocation) {
+            navigator.geolocation.watchPosition(position => {
+                const lat = position.coords.latitude;
+                const lng = position.coords.longitude;
+                const currentCell = h3.latLngToCell(lat, lng, 8);
+
+                document.getElementById('current-cell').innerText = currentCell;
+
+                if (!userMarker) {
+                    // Tu ubicación exacta representada por un punto brillante en el centro
+                    userMarker = L.circleMarker([lat, lng], {
+                        radius: 9, fillColor: "#00ffcc", color: "#ffffff", weight: 2.5, fillOpacity: 1
+                    }).addTo(map);
+                    map.setView([lat, lng], 16);
+                } else {
+                    userMarker.setLatLng([lat, lng]);
+                    if (!isUserInteracting) {
+                        map.panTo([lat, lng], {animate: true});
+                    }
+                }
+
+                loadRadarData();
+            }, err => {
+                document.getElementById('gps-status').innerText = 'GPS DENEGADO';
+            }, { enableHighAccuracy: true });
+        }
+
+        setInterval(loadRadarData, 30000);
+    </script>
+</body>
+</html>
