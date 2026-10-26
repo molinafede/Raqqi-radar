@@ -44,7 +44,8 @@
     <script>
         const map = L.map('map', {zoomControl: true, attributionControl: false}).setView([-34.6037, -58.3816], 13);
 
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}<i>{x}</i>{y}.png', {
+        // CORRECCIÓN: URL de OpenStreetMap limpia y sin etiquetas rotas
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
             attribution: '&copy; OpenStreetMap'
         }).addTo(map);
@@ -72,7 +73,6 @@
                         hasRedTarget = true;
                     }
 
-                    // Dibujar el polígono hexagonal
                     const polygon = L.polygon(latLngs, {
                         color: hex.color,
                         weight: hex.color === '#ff4d4d' ? 2 : 1,
@@ -80,7 +80,6 @@
                         fillOpacity: hex.opacity
                     }).addTo(hexLayerGroup);
 
-                    // Si la celda tiene actividad, agregamos la etiqueta numérica flotante al centro
                     if (hex.count > 0) {
                         const centerLat = latLngs.reduce((sum, c) => sum + c[0], 0) / latLngs.length;
                         const centerLng = latLngs.reduce((sum, c) => sum + c[1], 0) / latLngs.length;
@@ -98,41 +97,3 @@
                         L.marker([centerLat, centerLng], { icon: customIcon }).addTo(hexLayerGroup);
                     }
                 });
-
-                document.getElementById('action-state').innerText = hasRedTarget ? '¡OBJETIVO ROJO LOCALIZADO!' : 'ZONA NEUTRAL';
-            })
-            .catch(err => {
-                document.getElementById('gps-status').innerText = 'SIN DATOS JSON';
-            });
-        }
-
-        if (navigator.geolocation) {
-            navigator.geolocation.watchPosition(position => {
-                const lat = position.coords.latitude;
-                const lng = position.coords.longitude;
-                const currentCell = h3.latLngToCell(lat, lng, 8);
-
-                document.getElementById('current-cell').innerText = currentCell;
-
-                if (!userMarker) {
-                    userMarker = L.circleMarker([lat, lng], {
-                        radius: 9, fillColor: "#00ffcc", color: "#ffffff", weight: 2.5, fillOpacity: 1
-                    }).addTo(map);
-                    map.setView([lat, lng], 15);
-                } else {
-                    userMarker.setLatLng([lat, lng]);
-                    if (!isUserInteracting) {
-                        map.panTo([lat, lng], {animate: true});
-                    }
-                }
-
-                loadRadarData();
-            }, err => {
-                document.getElementById('gps-status').innerText = 'GPS DENEGADO';
-            }, { enableHighAccuracy: true });
-        }
-
-        setInterval(loadRadarData, 30000);
-    </script>
-</body>
-</html>
