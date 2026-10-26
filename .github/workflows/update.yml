@@ -1,0 +1,32 @@
+name: Actualizar Radar Táctico
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clonar Repositorio
+        uses: actions/checkout@v3
+
+      - name: Configurar Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Instalar Dependencias
+        run: pip install httpx h3
+
+      - name: Ejecutar Motor de Radar
+        run: python update_radar.py
+
+      - name: Publicar cambios en GitHub
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add radar_data.json
+          git commit -m "Auto-update radar grid data" || exit 0
+          git push
