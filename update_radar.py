@@ -2,7 +2,6 @@ import json
 import httpx
 import h3
 
-# Polos gastronómicos estratégicos en CABA y Conurbano Sur
 HUBS = [
     {"lat": -34.6037, "lng": -58.3816},  # CABA Centro
     {"lat": -34.5885, "lng": -58.4103},  # Palermo / Recoleta
@@ -18,7 +17,6 @@ def generate_radar():
         "Accept": "application/json"
     }
 
-    # 1. Consultar la API de tiendas en tiempo real en cada hub
     for hub in HUBS:
         stores_endpoint = f"https://www.argentina.rappi.com/api/rocket/stores?lat={hub['lat']}&lng={hub['lng']}"
         try:
@@ -34,8 +32,6 @@ def generate_radar():
                 for store in stores:
                     lat = store.get("lat") or store.get("latitude") or store.get("location", {}).get("lat")
                     lng = store.get("lng") or store.get("longitude") or store.get("location", {}).get("lng")
-                    
-                    # Extraer métricas operativas en vivo (como el tiempo estimado de entrega / ETA)
                     delivery_time = store.get("delivery_time", 30)
                     is_open = store.get("is_open", True)
                     
@@ -49,54 +45,47 @@ def generate_radar():
         except Exception as e:
             print(f"Error consultando hub {hub}: {e}")
 
-    # 2. Generar malla de celdas H3 (resolución 8)
     target_cells = set()
     for hub in HUBS:
         center_cell = h3.latlng_to_cell(hub['lat'], hub['lng'], 8)
         disk = h3.grid_disk(center_cell, 3)
         target_cells.update(disk)
 
-    # 3. Calcular el puntaje de presión operativa por celda
     cell_metrics = {}
     for cell in target_cells:
         c_lat, c_lng = h3.cell_to_latlng(cell)
         
-        # Filtro geográfico estricto para evitar coordenadas fuera del área urbana
         if c_lat > -34.3 or c_lat < -35.2 or c_lng > -57.8 or c_lng < -59.0:
             continue
 
         active_count = 0
-        total_eta_pressure = 0
+        total_eta = 0
         
         for store in all_stores:
             if store["is_open"]:
                 if abs(store["lat"] - c_lat) < 0.005 and abs(store["lng"] - c_lng) < 0.005:
                     active_count += 1
-                    total_eta_pressure += store["delivery_time"]
+                    total_eta += store["delivery_time"]
         
-        # Fórmula de estrés: combina volumen de locales abiertos + aumento en el tiempo de entrega (ETA)
-        avg_eta = (total_eta_pressure / active_count) if active_count > 0 else 0
-        operational_score = (active_count * 12) + (avg_eta * 2.0)
+        avg_eta = (total_eta / active_count) if active_count > 0 else 0
+        # Métrica de presión combinada
+        pressure_score = (active_count * 10) + avg_eta
         
         cell_metrics[cell] = {
             "count": active_count,
-            "score": operational_score
+            "score": pressure_score
         }
 
-    # 4. Asignación Dinámica por Percentil Superior de Estrés Operativo
-    if cell_metrics:
-        scores = [m["score"] for m in cell_metrics.values()]
-        max_score = max(scores) if scores else 0
-        # El top 30% con mayor presión y demora operativa se convierte en Zona Roja
-        threshold = max_score * 0.30 if max_score > 0 else 0
-    else:
-        threshold = 0
+    # Umbral dinámico optimizado para garantizar que las zonas con actividad destaquen en rojo
+    active_scores = [m["score"] for m in cell_metrics.values() if m["count"] > 0]
+    avg_score = (sum(active_scores) / len(active_scores)) if active_scores else 0
 
     analyzed_hexagons = []
     for cell, metrics in cell_metrics.items():
         c_lat, c_lng = h3.cell_to_latlng(cell)
         
-        is_target = metrics["score"] >= threshold and metrics["count"] > 0
+        # Es zona roja si tiene locales abiertos y supera el promedio de actividad de la región
+        is_target = metrics["count"] > 0 and metrics["score"] >= avg_score
         
         color = "#ff4d4d" if is_target else "#3388ff"
         opacity = 0.70 if is_target else 0.03 
@@ -107,7 +96,8 @@ def generate_radar():
             "boundary": boundary,
             "color": color,
             "opacity": opacity,
-            "score": metrics["score"]
+            "count": metrics["count"],
+            "score": int(metrics["score"])
         })
 
     output = {
