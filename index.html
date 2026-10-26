@@ -16,6 +16,13 @@
         }
         .hud-status { font-size: 11px; line-height: 1.4; }
         .target-alert { font-size: 12px; font-weight: bold; color: #ff4d4d; text-align: right; }
+        .hex-badge {
+            background: rgba(11, 15, 25, 0.85); border: 1px solid #fff; padding: 2px 5px;
+            border-radius: 4px; font-family: monospace; font-size: 10px; font-weight: bold;
+            display: flex; gap: 4px; white-space: nowrap; transform: translate(-50%, -50%);
+        }
+        .badge-green { color: #00ffcc; }
+        .badge-bordo { color: #ff4d4d; }
     </style>
 </head>
 <body>
@@ -37,7 +44,7 @@
     <script>
         const map = L.map('map', {zoomControl: true, attributionControl: false}).setView([-34.6037, -58.3816], 13);
 
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}<i>{x}</i>{y}.png', {
             maxZoom: 19,
             attribution: '&copy; OpenStreetMap'
         }).addTo(map);
@@ -59,19 +66,37 @@
                 let hasRedTarget = false;
 
                 data.hexagons.forEach(hex => {
-                    // CORRECCIÓN CRÍTICA: Usar [lat, lng] en orden correcto sin invertir
                     const latLngs = hex.boundary.map(coord => [coord[0], coord[1]]);
                     
                     if (hex.color === '#ff4d4d') {
                         hasRedTarget = true;
                     }
 
-                    L.polygon(latLngs, {
+                    // Dibujar el polígono hexagonal
+                    const polygon = L.polygon(latLngs, {
                         color: hex.color,
                         weight: hex.color === '#ff4d4d' ? 2 : 1,
                         fillColor: hex.color,
                         fillOpacity: hex.opacity
                     }).addTo(hexLayerGroup);
+
+                    // Si la celda tiene actividad, agregamos la etiqueta numérica flotante al centro
+                    if (hex.count > 0) {
+                        const centerLat = latLngs.reduce((sum, c) => sum + c[0], 0) / latLngs.length;
+                        const centerLng = latLngs.reduce((sum, c) => sum + c[1], 0) / latLngs.length;
+
+                        const badgeHtml = `<div class="hex-badge">
+                            <span class="badge-green" title="Locales Activos">🛒${hex.count}</span>
+                            <span class="badge-bordo" title="Índice de Presión/Demora">⚡${hex.score}</span>
+                        </div>`;
+
+                        const customIcon = L.divIcon({
+                            className: '',
+                            html: badgeHtml
+                        });
+
+                        L.marker([centerLat, centerLng], { icon: customIcon }).addTo(hexLayerGroup);
+                    }
                 });
 
                 document.getElementById('action-state').innerText = hasRedTarget ? '¡OBJETIVO ROJO LOCALIZADO!' : 'ZONA NEUTRAL';
